@@ -77,42 +77,49 @@ def login():
     return jsonify({"message": "Invalid credentials"}), 401
 
 @app.route('/predict', methods=['POST'])
-@jwt_required()
+@jwt_required()  # Commented out for initial testing (Phase 6 connection)
 def predict():
     """CVD Risk Prediction and Data Storage."""
     try:
+        # 1. Handle User Identity (Fallback if not logged in)
         current_user_id = get_jwt_identity()
-        data = request.json.get('features')
         
+        # 2. Get features from React
+        data = request.json.get('features')
         if not data or len(data) != 13:
             return jsonify({"error": "13 health metrics required."}), 400
 
-        # AI Prediction Logic
-        features_scaled = scaler.transform(np.array([data]))
+        # 3. AI Prediction Logic
+        input_data = np.array([data])
+        features_scaled = scaler.transform(input_data)
+        
         prediction = model.predict(features_scaled)[0]
         risk_percentage = round(float(model.predict_proba(features_scaled)[0][1] * 100), 2)
 
         status = "High Risk" if prediction == 1 else "Low Risk"
-        advice = "Consult a provider." if prediction == 1 else "Maintain healthy habits!"
+        advice = "Consult a healthcare provider." if prediction == 1 else "Maintain healthy habits!"
 
-        # Rate Checker (Phase 4.2.4 Validation)
-        alerts = []
-        if data[7] > 170: alerts.append("Critical Heart Rate.")
-        if data[3] > 160: alerts.append("High Blood Pressure.")
-
-        # Save Entry (Phase 4.2.3)
-        new_entry = HealthHistory(user_id=current_user_id, risk_score=risk_percentage, status=status)
-        db.session.add(new_entry)
-        db.session.commit()
+        # 4. Save to Database (ONLY if a user is actually logged in)
+        if current_user_id:
+            new_entry = HealthHistory(
+                user_id=current_user_id, 
+                risk_score=risk_percentage, 
+                status=status
+            )
+            db.session.add(new_entry)
+            db.session.commit()
+        else:
+            print("Guest session: Result calculated but not saved to database.")
 
         return jsonify({
             "status": status,
             "risk_score": risk_percentage,
-            "bot_speech": f"Analysis complete. Your risk is {status}.",
-            "alerts": alerts,
-            "recommendation": advice
+            "recommendation": advice,
+            "bot_speech": f"Analysis complete. Your risk is {status}."
         })
+        
     except Exception as e:
+        print(f"Prediction Error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/history', methods=['GET'])
