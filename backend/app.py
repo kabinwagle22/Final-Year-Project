@@ -77,7 +77,7 @@ def login():
     return jsonify({"message": "Invalid credentials"}), 401
 
 @app.route('/predict', methods=['POST'])
-@jwt_required()  # Commented out for initial testing (Phase 6 connection)
+@jwt_required()  
 def predict():
     """CVD Risk Prediction and Data Storage."""
     try:
