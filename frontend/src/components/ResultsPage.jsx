@@ -1,10 +1,10 @@
 import React from 'react';
-import { AlertTriangle, CheckCircle, RefreshCw, Share2, Info } from 'lucide-react';
+import { generatePDF } from '../utils/reportGenerator';
+import { AlertTriangle, CheckCircle, RefreshCw, Download, Info } from 'lucide-react';
 
-// Destructure exactly what App.jsx is sending
-const ResultsPage = ({ riskScore, status, recommendation, alerts = [], onReset }) => {
+// Added userInputs to the destructured props
+const ResultsPage = ({ riskScore, status, recommendation, userInputs, alerts = [], onReset }) => {
   
-  // 1. Logic check: Use the props sent from App.jsx
   const displayScore = riskScore || 0;
   const displayStatus = status || "Analysis Complete";
   const displayRec = recommendation || "Processing your results...";
@@ -14,6 +14,20 @@ const ResultsPage = ({ riskScore, status, recommendation, alerts = [], onReset }
   const colorClass = isHighRisk ? 'text-red-600' : 'text-green-600';
   const bgColor = isHighRisk ? 'bg-red-50' : 'bg-green-50';
   const borderColor = isHighRisk ? 'border-red-100' : 'border-green-100';
+
+  // Function to handle the PDF trigger
+  const handleDownloadReport = () => {
+    if (!userInputs) {
+      alert("Input data not found. Please try the assessment again.");
+      return;
+    }
+    // Calling our utility function
+    generatePDF(userInputs, { 
+        risk_score: displayScore, 
+        status: displayStatus, 
+        recommendation: displayRec 
+    });
+  };
 
   return (
     <div className="max-w-2xl mx-auto my-12 p-8 bg-white rounded-3xl shadow-xl border border-slate-100 animate-in fade-in zoom-in duration-500">
@@ -30,7 +44,6 @@ const ResultsPage = ({ riskScore, status, recommendation, alerts = [], onReset }
             style={{ 
               borderColor: isHighRisk ? '#EF4444' : '#10B981',
               clipPath: 'inset(0 0 50% 0)',
-              // Math: 1.8 degrees per percentage point (180 deg / 100%)
               transform: `rotate(${(displayScore * 1.8) - 90}deg)` 
             }}
           ></div>
@@ -83,8 +96,12 @@ const ResultsPage = ({ riskScore, status, recommendation, alerts = [], onReset }
         >
           <RefreshCw size={18} /> New Test
         </button>
-        <button className="flex items-center justify-center gap-2 bg-blue-600 py-4 rounded-xl font-bold text-white hover:bg-blue-700 shadow-lg shadow-blue-200 transition active:scale-95">
-          <Share2 size={18} /> Save PDF
+        {/* Updated Button to trigger PDF download */}
+        <button 
+          onClick={handleDownloadReport}
+          className="flex items-center justify-center gap-2 bg-blue-600 py-4 rounded-xl font-bold text-white hover:bg-blue-700 shadow-lg shadow-blue-200 transition active:scale-95"
+        >
+          <Download size={18} /> Download PDF
         </button>
       </div>
     </div>

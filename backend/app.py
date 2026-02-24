@@ -8,13 +8,14 @@ from flask_bcrypt import Bcrypt
 from flask_jwt_extended import JWTManager, jwt_required, create_access_token, get_jwt_identity
 import datetime
 import requests
+from dotenv import load_dotenv
 
 app = Flask(__name__)
 
 # --- CONFIGURATION ---
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///cvd_database.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-# Lengthened key to remove the InsecureKeyLengthWarning
+# Secure key for production
 app.config['JWT_SECRET_KEY'] = 'cvd-secure-jwt-secret-key-2026-v1-stable-production-final-ultra-secure' 
 
 db = SQLAlchemy(app)
@@ -93,7 +94,7 @@ def get_history():
     history = HealthHistory.query.filter_by(user_id=int(user_id)).order_by(HealthHistory.timestamp.desc()).all()
     return jsonify([{"risk_score": h.risk_score, "status": h.status, "timestamp": h.timestamp.strftime("%Y-%m-%d %H:%M")} for h in history]), 200
 
-# --- THE CHATBOT (NEW HF ROUTER VERSION) ---
+# --- THE CHATBOT ---
 
 @app.route('/api/chatbot', methods=['POST'])
 @jwt_required()
@@ -103,11 +104,20 @@ def chatbot():
 
     last = HealthHistory.query.filter_by(user_id=int(user_id)).order_by(HealthHistory.timestamp.desc()).first()
     context = f"User's last CVD risk score: {last.risk_score}% ({last.status})." if last else "No history."
+    
+    load_dotenv()
+    hf_token = os.getenv("HUGGINGFACE_TOKEN")
 
-    HF_TOKEN = "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"
-    # Using the Router endpoint as you discovered worked best
+    if hf_token:
+        hf_token = hf_token.strip()
+    else:
+        return jsonify({"response": "API Key is missing from the server environment."})
+
     API_URL = "https://router.huggingface.co/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {hf_token}", 
+        "Content-Type": "application/json"
+    }
 
     try:
         payload = {
@@ -134,13 +144,17 @@ def chatbot():
         response = requests.post(API_URL, headers=headers, json=payload, timeout=15)
         output = response.json()
 
+        print(f"DEBUG HF RESPONSE: {output}")
+
         if "choices" in output:
             bot_text = output['choices'][0]['message']['content'].strip()
             return jsonify({"response": bot_text})
         
-        return jsonify({"response": "I'm having trouble retrieving your report. Your last score was " + context})
+        error_msg = output.get("error", "Unknown API error")
+        return jsonify({"response": f"I'm having trouble. API says: {error_msg}. Your last score was {context}"})
 
     except Exception as e:
+        print(f"CHATBOT EXCEPTION: {e}")
         return jsonify({"response": "System busy. Please try again!"})
 
 if __name__ == '__main__':
