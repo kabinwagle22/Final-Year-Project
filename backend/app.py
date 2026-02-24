@@ -106,12 +106,21 @@ def chatbot():
     context = f"User's last CVD risk score: {last.risk_score}% ({last.status})." if last else "No history."
     
     load_dotenv()
-    # Ensure this variable name matches the one used in the headers below
     hf_token = os.getenv("HUGGINGFACE_TOKEN")
 
+    # FIX: Add .strip() to remove hidden spaces/newlines
+    if hf_token:
+        hf_token = hf_token.strip()
+    else:
+        return jsonify({"response": "API Key is missing from the server environment."})
+
     API_URL = "https://router.huggingface.co/v1/chat/completions"
-    # Use hf_token here
-    headers = {"Authorization": f"Bearer {hf_token}", "Content-Type": "application/json"}
+    
+    # Ensure there is exactly one space after 'Bearer'
+    headers = {
+        "Authorization": f"Bearer {hf_token}", 
+        "Content-Type": "application/json"
+    }
 
     try:
         payload = {
@@ -138,13 +147,19 @@ def chatbot():
         response = requests.post(API_URL, headers=headers, json=payload, timeout=15)
         output = response.json()
 
+        # ADD THIS LINE TO SEE THE REAL ERROR IN YOUR TERMINAL
+        print(f"DEBUG HF RESPONSE: {output}")
+
         if "choices" in output:
             bot_text = output['choices'][0]['message']['content'].strip()
             return jsonify({"response": bot_text})
         
-        return jsonify({"response": "I'm having trouble retrieving your report. Your last score was " + context})
+        # This will now tell the user the specific error from HF
+        error_msg = output.get("error", "Unknown API error")
+        return jsonify({"response": f"I'm having trouble. API says: {error_msg}. Your last score was {context}"})
 
     except Exception as e:
+        print(f"CHATBOT EXCEPTION: {e}")
         return jsonify({"response": "System busy. Please try again!"})
 
 if __name__ == '__main__':

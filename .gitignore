@@ -5,3 +5,6 @@ instance/
 .DS_Store
 backend/cvd_database.db
 .env
+node_modules
+dist
+build
