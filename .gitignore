@@ -4,3 +4,4 @@ __pycache__/
 instance/
 .DS_Store
 backend/cvd_database.db
+.env

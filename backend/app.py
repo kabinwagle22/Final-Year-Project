@@ -7,21 +7,23 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
 from flask_jwt_extended import JWTManager, jwt_required, create_access_token, get_jwt_identity
 import datetime
+import requests
+from dotenv import load_dotenv
 
 app = Flask(__name__)
 
-# --- CONFIGURATION (Phase 4.2.4 Security) ---
+# --- CONFIGURATION ---
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///cvd_database.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['JWT_SECRET_KEY'] = 'level6-super-secret-key' 
+# Lengthened key to remove the InsecureKeyLengthWarning
+app.config['JWT_SECRET_KEY'] = 'cvd-secure-jwt-secret-key-2026-v1-stable-production-final-ultra-secure' 
 
-# Initialize tools
 db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
 CORS(app)
 
-# --- MODELS (Phase 4.2.3 Data Storage) ---
+# --- DATABASE MODELS ---
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
@@ -35,118 +37,117 @@ class HealthHistory(db.Model):
     status = db.Column(db.String(20), nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
-# --- MODEL LOADING ---
+# --- ML MODEL LOADING ---
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 try:
     model_path = os.path.join(BASE_DIR, 'models', 'cvd_model.pkl')
     scaler_path = os.path.join(BASE_DIR, 'models', 'scaler.pkl')
     model = joblib.load(model_path)
     scaler = joblib.load(scaler_path)
-    print("Model and Scaler loaded successfully.")
+    print("✓ CVD ML System: Loaded Successfully.")
 except Exception as e:
-    print(f"Error loading model files: {e}")
+    print(f"✗ ML Loading Error: {e}")
 
-# --- API ENDPOINTS (Phase 4.1) ---
-
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    """Endpoint for API health check."""
-    return jsonify({"status": "healthy", "database": "connected"}), 200
+# --- AUTH ROUTES ---
 
 @app.route('/register', methods=['POST'])
 def register():
-    """User registration with password hashing."""
     data = request.json
     if User.query.filter_by(username=data.get('username')).first():
-        return jsonify({"message": "User already exists"}), 400
-    
+        return jsonify({"message": "User exists"}), 400
     hashed_pw = bcrypt.generate_password_hash(data.get('password')).decode('utf-8')
     new_user = User(username=data.get('username'), password=hashed_pw)
     db.session.add(new_user)
     db.session.commit()
-    return jsonify({"message": "User registered successfully!"}), 201
+    return jsonify({"token": create_access_token(identity=str(new_user.id))}), 201
 
 @app.route('/login', methods=['POST'])
 def login():
-    """User authentication and JWT generation."""
     data = request.json
     user = User.query.filter_by(username=data.get('username')).first()
     if user and bcrypt.check_password_hash(user.password, data.get('password')):
-        access_token = create_access_token(identity=str(user.id))
-        return jsonify({"token": access_token, "username": user.username}), 200
+        return jsonify({"token": create_access_token(identity=str(user.id)), "username": user.username}), 200
     return jsonify({"message": "Invalid credentials"}), 401
+
+# --- PREDICTION LOGIC ---
 
 @app.route('/predict', methods=['POST'])
 @jwt_required()  
 def predict():
-    """CVD Risk Prediction and Data Storage."""
     try:
-        # 1. Handle User Identity (Fallback if not logged in)
-        current_user_id = get_jwt_identity()
-        
-        # 2. Get features from React
+        user_id = get_jwt_identity()
         data = request.json.get('features')
-        if not data or len(data) != 13:
-            return jsonify({"error": "13 health metrics required."}), 400
-
-        # 3. AI Prediction Logic
-        input_data = np.array([data])
-        features_scaled = scaler.transform(input_data)
-        
-        prediction = model.predict(features_scaled)[0]
-        risk_percentage = round(float(model.predict_proba(features_scaled)[0][1] * 100), 2)
-
-        status = "High Risk" if prediction == 1 else "Low Risk"
-        advice = "Consult a healthcare provider." if prediction == 1 else "Maintain healthy habits!"
-
-        # 4. Save to Database (ONLY if a user is actually logged in)
-        if current_user_id:
-            new_entry = HealthHistory(
-                user_id=current_user_id, 
-                risk_score=risk_percentage, 
-                status=status
-            )
-            db.session.add(new_entry)
-            db.session.commit()
-        else:
-            print("Guest session: Result calculated but not saved to database.")
-
-        return jsonify({
-            "status": status,
-            "risk_score": risk_percentage,
-            "recommendation": advice,
-            "bot_speech": f"Analysis complete. Your risk is {status}."
-        })
-        
+        features_scaled = scaler.transform(np.array([data]))
+        risk_score = round(float(model.predict_proba(features_scaled)[0][1] * 100), 2)
+        status = "High Risk" if risk_score > 50 else "Low Risk"
+        new_entry = HealthHistory(user_id=int(user_id), risk_score=risk_score, status=status)
+        db.session.add(new_entry)
+        db.session.commit()
+        return jsonify({"status": status, "risk_score": risk_score})
     except Exception as e:
-        print(f"Prediction Error: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/history', methods=['GET'])
+@app.route('/history', methods=['GET'])
 @jwt_required()
 def get_history():
-    """Retrieve prediction history for the authenticated user."""
     user_id = get_jwt_identity()
-    records = HealthHistory.query.filter_by(user_id=user_id).all()
-    history = [{"risk_score": r.risk_score, "status": r.status, "date": r.timestamp.strftime("%Y-%m-%d %H:%M")} for r in records]
-    return jsonify(history), 200
+    history = HealthHistory.query.filter_by(user_id=int(user_id)).order_by(HealthHistory.timestamp.desc()).all()
+    return jsonify([{"risk_score": h.risk_score, "status": h.status, "timestamp": h.timestamp.strftime("%Y-%m-%d %H:%M")} for h in history]), 200
+
+# --- THE CHATBOT (NEW HF ROUTER VERSION) ---
 
 @app.route('/api/chatbot', methods=['POST'])
 @jwt_required()
 def chatbot():
-    """Chatbot Intent Recognition and Response (Phase 4.3)."""
-    user_msg = request.json.get('message', '').lower()
+    user_msg = request.json.get('message', '')
     user_id = get_jwt_identity()
 
-    if "last" in user_msg or "history" in user_msg:
-        last = HealthHistory.query.filter_by(user_id=user_id).order_by(HealthHistory.timestamp.desc()).first()
-        response = f"Your last risk score was {last.risk_score}%." if last else "No history found."
-    elif "bp" in user_msg:
-        response = "Normal BP is usually below 120/80 mmHg."
-    else:
-        response = "I can explain your risk scores or show your history."
+    last = HealthHistory.query.filter_by(user_id=int(user_id)).order_by(HealthHistory.timestamp.desc()).first()
+    context = f"User's last CVD risk score: {last.risk_score}% ({last.status})." if last else "No history."
     
-    return jsonify({"response": response})
+    load_dotenv()
+    # Ensure this variable name matches the one used in the headers below
+    hf_token = os.getenv("HUGGINGFACE_TOKEN")
+
+    API_URL = "https://router.huggingface.co/v1/chat/completions"
+    # Use hf_token here
+    headers = {"Authorization": f"Bearer {hf_token}", "Content-Type": "application/json"}
+
+    try:
+        payload = {
+            "model": "meta-llama/Meta-Llama-3-8B-Instruct",
+            "messages": [
+                {
+                    "role": "system", 
+                    "content": (
+                        "You are a supportive and professional Cardiovascular Assistant. "
+                        "FORMATTING RULES:\n"
+                        "1. Use '###' for headers.\n"
+                        "2. Use '---' for horizontal dividers.\n"
+                        "3. Use 🔴 for high risk (>50%) and 🟢 for low risk (<50%).\n"
+                        "4. When the user asks for results, provide a 'Heart Health Snapshot'.\n"
+                        "5. IMPORTANT: Do not list all missing factors at once. Pick the most important one (like Blood Pressure) "
+                        "and ask for it nicely. Keep responses under 150 words."
+                    )
+                },
+                {"role": "user", "content": f"Context: {context}\n\nUser Message: {user_msg}"}
+            ],
+            "max_tokens": 300
+        }
+        
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=15)
+        output = response.json()
+
+        if "choices" in output:
+            bot_text = output['choices'][0]['message']['content'].strip()
+            return jsonify({"response": bot_text})
+        
+        return jsonify({"response": "I'm having trouble retrieving your report. Your last score was " + context})
+
+    except Exception as e:
+        return jsonify({"response": "System busy. Please try again!"})
 
 if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
     app.run(debug=True, port=5001)
