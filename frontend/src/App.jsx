@@ -77,31 +77,30 @@ function App() {
     }
   };
 
-  const handleCalculate = async (formData) => {
-    setLastInputs(formData);
+  const handleCalculate = async (featureArray) => {
+    // We store the array for the results page to use later
+    setLastInputs(featureArray); 
+    
     try {
-      const featureArray = [
-        Number(formData.age), Number(formData.sex), Number(formData.cp),
-        Number(formData.trestbps), Number(formData.chol), Number(formData.fbs),
-        Number(formData.restecg), Number(formData.thalach), Number(formData.exang),
-        Number(formData.oldpeak), Number(formData.slope), Number(formData.ca), Number(formData.thal)
-      ];
-
       const response = await fetch('http://127.0.0.1:5001/predict', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
+        // We send the featureArray directly because AssessmentForm already 
+        // formatted it into the correct 13-number list!
         body: JSON.stringify({ features: featureArray }),
       });
 
       const data = await response.json();
+      
       if (response.status === 401) {
         handleLogout();
         alert("Session expired. Please login again.");
         return;
       }
+
       setRiskData(data); 
       setView('results');
     } catch (error) {

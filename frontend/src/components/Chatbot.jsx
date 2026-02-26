@@ -1,27 +1,28 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MessageCircle, X, Send, Bot, User } from 'lucide-react';
+import { MessageCircle, X, Send, Bot, ShieldAlert } from 'lucide-react';
 
 const Chatbot = ({ token }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false); // NEW: Track loading state
   const [messages, setMessages] = useState([
     { role: 'bot', text: "Hello! I'm your CVD Assistant. How can I help you understand your heart health today?" }
   ]);
   const scrollRef = useRef(null);
 
-  // Auto-scroll to the latest message
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, isLoading]); // Scroll when loading starts too
 
   const handleSend = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || isLoading) return;
 
     const userMsg = { role: 'user', text: input };
     setMessages(prev => [...prev, userMsg]);
     setInput('');
+    setIsLoading(true); // Start loading
 
     try {
       const response = await fetch('http://127.0.0.1:5001/api/chatbot', {
@@ -34,15 +35,17 @@ const Chatbot = ({ token }) => {
       });
 
       const data = await response.json();
+      // Note: Backend uses data.response
       setMessages(prev => [...prev, { role: 'bot', text: data.response }]);
     } catch (error) {
       setMessages(prev => [...prev, { role: 'bot', text: "Sorry, I'm having trouble connecting to my brain right now." }]);
+    } finally {
+      setIsLoading(false); // Stop loading
     }
   };
 
   return (
     <div className="fixed bottom-6 right-6 z-[100]">
-      {/* Chat Toggle Button */}
       <button 
         onClick={() => setIsOpen(!isOpen)}
         className="bg-blue-600 hover:bg-blue-700 text-white p-4 rounded-full shadow-2xl transition-all active:scale-95"
@@ -50,10 +53,8 @@ const Chatbot = ({ token }) => {
         {isOpen ? <X size={28} /> : <MessageCircle size={28} />}
       </button>
 
-      {/* Chat Window */}
       {isOpen && (
         <div className="absolute bottom-20 right-0 w-80 md:w-96 bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in slide-in-from-bottom-5 duration-300">
-          {/* Header */}
           <div className="bg-blue-600 p-4 text-white flex items-center gap-2">
             <Bot size={20} />
             <span className="font-bold">Heart AI Assistant</span>
@@ -66,15 +67,29 @@ const Chatbot = ({ token }) => {
                 <div className={`max-w-[80%] p-3 rounded-2xl text-sm ${
                   msg.role === 'user' 
                     ? 'bg-blue-600 text-white rounded-tr-none' 
-                    : 'bg-white text-slate-700 border border-slate-200 rounded-tl-none'
+                    : 'bg-white text-slate-700 border border-slate-200 rounded-tl-none shadow-sm'
                 }`}>
                   {msg.text}
                 </div>
               </div>
             ))}
+            {isLoading && (
+              <div className="flex justify-start">
+                <div className="bg-white border border-slate-200 p-3 rounded-2xl rounded-tl-none shadow-sm italic text-xs text-slate-400">
+                  AI is analyzing your health data...
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Input Area */}
+          {/* NEW: Safety Disclaimer Section */}
+          <div className="px-4 py-2 bg-slate-100 border-t border-slate-200 flex items-center gap-2">
+            <ShieldAlert size={14} className="text-slate-500" />
+            <span className="text-[10px] text-slate-500 italic leading-tight">
+              CVD-AI is for educational use. Not a medical substitute. In emergency, contact local services.
+            </span>
+          </div>
+
           <div className="p-4 border-t bg-white flex gap-2">
             <input 
               type="text"
@@ -83,10 +98,12 @@ const Chatbot = ({ token }) => {
               onKeyPress={(e) => e.key === 'Enter' && handleSend()}
               placeholder="Type a message..."
               className="flex-1 bg-slate-100 border-none rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              disabled={isLoading}
             />
             <button 
               onClick={handleSend}
-              className="bg-blue-600 text-white p-2 rounded-xl hover:bg-blue-700 transition"
+              disabled={isLoading}
+              className={`bg-blue-600 text-white p-2 rounded-xl transition ${isLoading ? 'opacity-50' : 'hover:bg-blue-700'}`}
             >
               <Send size={18} />
             </button>
